@@ -1,0 +1,226 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "metadata": {
+    "title": "Cloudflare Firewall Events CCF Connector",
+    "description": "Codeless Connector Framework (CCF) connector that pulls Cloudflare firewallEventsAdaptive logs into Microsoft Sentinel via the GraphQL Analytics API. Credentials are supplied at deploy time as ARM parameters. The API token is a SecureString \u2014 entered at the deployment form and never stored in the template.",
+    "author": "Aman Khan",
+    "version": "1.0.0"
+  },
+  "parameters": {
+    "workspaceName": {
+      "type": "String",
+      "metadata": {
+        "description": "Log Analytics workspace name where Microsoft Sentinel is enabled."
+      }
+    },
+    "workspaceLocation": {
+      "type": "String",
+      "defaultValue": "[resourceGroup().location]",
+      "metadata": {
+        "description": "Azure region. Must match your workspace, DCE, and DCR region."
+      }
+    },
+    "cloudflareApiToken": {
+      "type": "SecureString",
+      "metadata": {
+        "description": "Cloudflare API Token (Bearer). Requires Account Analytics:Read and Zone Analytics:Read permissions. Create at Cloudflare dashboard -> My Profile -> API Tokens."
+      }
+    },
+    "zoneTag": {
+      "type": "String",
+      "metadata": {
+        "description": "Cloudflare Zone ID. Find it in your Cloudflare dashboard under the domain Overview page."
+      }
+    },
+    "dataCollectionEndpoint": {
+      "type": "String",
+      "metadata": {
+        "description": "DCE Logs Ingestion Endpoint URL. Format: https://{dce-name}-{id}.{region}.ingest.monitor.azure.com"
+      }
+    },
+    "dataCollectionRuleImmutableId": {
+      "type": "String",
+      "metadata": {
+        "description": "Immutable ID of your existing DCR. Format: dcr-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      }
+    },
+    "streamName": {
+      "type": "String",
+      "defaultValue": "Custom-cloudflarefirewall_CL",
+      "metadata": {
+        "description": "Stream name in your DCR's streamDeclarations section. Must match exactly."
+      }
+    },
+    "queryWindowInMin": {
+      "type": "Int",
+      "defaultValue": 1,
+      "minValue": 1,
+      "maxValue": 60,
+      "metadata": {
+        "description": "Polling interval in minutes. Smaller windows = lower risk of hitting the 1000-event/poll limit on busy zones."
+      }
+    }
+  },
+  "variables": {
+    "connectorDefinitionName": "CloudflareFirewallConnector",
+    "connectorId": "CloudflareFirewallEventsAdaptivePoller"
+  },
+  "resources": [
+    {
+      "comments": "RESOURCE 1 \u2014 Connector UI Definition. Renders the connector card in Sentinel Data Connectors gallery for status/monitoring purposes. Credentials are NOT entered through this UI \u2014 they are supplied as ARM parameters at template deployment time.",
+      "type": "Microsoft.SecurityInsights/dataConnectorDefinitions",
+      "apiVersion": "2024-09-01",
+      "name": "[variables('connectorDefinitionName')]",
+      "location": "[parameters('workspaceLocation')]",
+      "kind": "Customizable",
+      "properties": {
+        "connectorUiConfig": {
+          "title": "Cloudflare Firewall Events (Adaptive)",
+          "publisher": "Aman Khan",
+          "descriptionMarkdown": "Ingests Cloudflare **firewallEventsAdaptive** logs via the Cloudflare GraphQL Analytics API. Credentials are configured at template deployment time. Polls every 1 minute by default.",
+          "graphQueriesTableName": "cloudflarefirewall_CL",
+          "dataTypes": [
+            {
+              "name": "cloudflarefirewall_CL",
+              "lastDataReceivedQuery": "cloudflarefirewall_CL\n| summarize Time = max(TimeGenerated)\n| where isnotempty(Time)"
+            }
+          ],
+          "connectivityCriteria": [
+            {
+              "type": "HasDataConnectors"
+            }
+          ],
+          "availability": {
+            "status": 1,
+            "isPreview": true
+          },
+          "permissions": {
+            "resourceProvider": [
+              {
+                "provider": "Microsoft.OperationalInsights/workspaces",
+                "providerDisplayName": "Workspace",
+                "permissionsDisplayText": "Read and write permissions on the workspace.",
+                "requiredPermissions": {
+                  "read": true,
+                  "write": true,
+                  "delete": false,
+                  "action": false
+                },
+                "scope": "Workspace"
+              }
+            ],
+            "customs": [
+              {
+                "name": "Cloudflare API Token",
+                "description": "API Token with Account Analytics:Read and Zone Analytics:Read permissions, supplied at deployment time."
+              }
+            ]
+          },
+          "sampleQueries": [
+            {
+              "description": "Latest firewall events",
+              "query": "{{graphQueriesTableName}}\n| sort by TimeGenerated desc\n| take 50"
+            },
+            {
+              "description": "Blocked requests by source country",
+              "query": "{{graphQueriesTableName}}\n| where action == 'block'\n| summarize Count = count() by clientCountryName\n| sort by Count desc"
+            },
+            {
+              "description": "Top attacking source IPs (last 24h)",
+              "query": "{{graphQueriesTableName}}\n| where TimeGenerated > ago(24h)\n| where action in ('block', 'challenge')\n| summarize Count = count() by clientIP\n| sort by Count desc\n| take 20"
+            },
+            {
+              "description": "Detect 1000-event/poll cap hits",
+              "query": "{{graphQueriesTableName}}\n| where TimeGenerated > ago(7d)\n| summarize EventCount = count() by bin(TimeGenerated, 1m)\n| where EventCount >= 1000\n| sort by TimeGenerated desc"
+            }
+          ],
+          "graphQueries": [
+            {
+              "metricName": "Events received",
+              "legend": "cloudflarefirewall_CL",
+              "baseQuery": "cloudflarefirewall_CL"
+            }
+          ],
+          "instructionSteps": [
+            {
+              "title": "How this connector works",
+              "description": "This is a deploy-time-configured CCF connector. All credentials and parameters were supplied when the ARM template was deployed. The connector starts polling immediately and ingests events into the `cloudflarefirewall_CL` Log Analytics table.",
+              "instructions": [
+                {
+                  "type": "Markdown",
+                  "parameters": {
+                    "content": "### Polling behaviour\n* Polls `https://api.cloudflare.com/client/v4/graphql` every 1 minute (configurable at deploy time).\n* Up to 1000 events per poll.\n* Allow up to 30 minutes for the first batch of events to appear.\n\n### To rotate credentials or change the zone\nRedeploy this template with the new values. ARM updates the existing connector resources in place."
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "scope": "[resourceId('Microsoft.OperationalInsights/workspaces', parameters('workspaceName'))]"
+    },
+    {
+      "comments": "RESOURCE 2 \u2014 RestApiPoller. Active immediately on deployment. Credentials supplied via ARM parameters (cloudflareApiToken is SecureString). Connectivity check runs at deploy time against the real Cloudflare API.",
+      "type": "Microsoft.OperationalInsights/workspaces/providers/dataConnectors",
+      "apiVersion": "2024-09-01",
+      "name": "[concat(parameters('workspaceName'), '/Microsoft.SecurityInsights/', variables('connectorId'))]",
+      "location": "[parameters('workspaceLocation')]",
+      "dependsOn": [
+        "[extensionResourceId(resourceId('Microsoft.OperationalInsights/workspaces', parameters('workspaceName')), 'Microsoft.SecurityInsights/dataConnectorDefinitions', variables('connectorDefinitionName'))]"
+      ],
+      "kind": "RestApiPoller",
+      "properties": {
+        "connectorDefinitionName": "[variables('connectorDefinitionName')]",
+        "dataType": "CloudflareFirewallEventsAdaptive",
+        "isActive": true,
+        "auth": {
+          "type": "APIKey",
+          "ApiKey": "[parameters('cloudflareApiToken')]",
+          "ApiKeyName": "Authorization",
+          "ApiKeyIdentifier": "Bearer",
+          "IsApiKeyInPostPayload": false
+        },
+        "request": {
+          "apiEndpoint": "https://api.cloudflare.com/client/v4/graphql",
+          "httpMethod": "POST",
+          "isPostPayloadJson": true,
+          "queryTimeFormat": "yyyy-MM-ddTHH:mm:ssZ",
+          "queryWindowInMin": "[parameters('queryWindowInMin')]",
+          "retryCount": 3,
+          "timeoutInSeconds": 30,
+          "headers": {
+            "Accept": "application/json",
+            "Content-Type": "application/json"
+          },
+          "queryParametersTemplate": "[concat('{\"query\": \"{ viewer { zones(filter: { zoneTag: \\\"', parameters('zoneTag'), '\\\" }) { firewallEventsAdaptive(filter: { datetime_geq: \\\"{_QueryWindowStartTime}\\\", datetime_leq: \\\"{_QueryWindowEndTime}\\\" }, limit: 1000, orderBy: [datetime_DESC]) { action clientCountryName clientIP clientRequestHTTPHost clientRequestHTTPMethodName clientRequestPath datetime rayName ruleId source userAgent } } } }\"}')]"
+        },
+        "response": {
+          "eventsJsonPaths": [
+            "$.data.viewer.zones[0].firewallEventsAdaptive[*]"
+          ],
+          "format": "json"
+        },
+        "dcrConfig": {
+          "dataCollectionEndpoint": "[parameters('dataCollectionEndpoint')]",
+          "dataCollectionRuleImmutableId": "[parameters('dataCollectionRuleImmutableId')]",
+          "streamName": "[parameters('streamName')]"
+        }
+      }
+    }
+  ],
+  "outputs": {
+    "connectorDefinitionName": {
+      "type": "string",
+      "value": "[variables('connectorDefinitionName')]"
+    },
+    "connectorId": {
+      "type": "string",
+      "value": "[variables('connectorId')]"
+    },
+    "nextSteps": {
+      "type": "string",
+      "value": "Deployment complete. The connector starts polling immediately. Allow up to 30 minutes for the first batch of events to appear in the cloudflarefirewall_CL table."
+    }
+  }
+}

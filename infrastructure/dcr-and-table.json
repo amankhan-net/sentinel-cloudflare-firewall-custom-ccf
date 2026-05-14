@@ -1,0 +1,256 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "metadata": {
+    "title": "Cloudflare Firewall CCF \u2014 DCR, DCE, and Custom Table",
+    "description": "Deploys the infrastructure resources required by the Cloudflare CCF connector: a custom Log Analytics table, a Data Collection Endpoint (DCE), and a Data Collection Rule (DCR) with the field-mapping transform.",
+    "author": "Aman Khan",
+    "version": "1.0.0"
+  },
+  "parameters": {
+    "workspaceName": {
+      "type": "String",
+      "metadata": {
+        "description": "Name of the Log Analytics workspace where Microsoft Sentinel is enabled."
+      }
+    },
+    "workspaceResourceGroup": {
+      "type": "String",
+      "defaultValue": "[resourceGroup().name]",
+      "metadata": {
+        "description": "Resource group containing the Log Analytics workspace. Defaults to the deployment resource group."
+      }
+    },
+    "location": {
+      "type": "String",
+      "defaultValue": "[resourceGroup().location]",
+      "metadata": {
+        "description": "Azure region. Must match the workspace region."
+      }
+    },
+    "dceName": {
+      "type": "String",
+      "defaultValue": "DCE-Cloudflare",
+      "metadata": {
+        "description": "Name for the Data Collection Endpoint."
+      }
+    },
+    "dcrName": {
+      "type": "String",
+      "defaultValue": "DCR-cloudflare",
+      "metadata": {
+        "description": "Name for the Data Collection Rule."
+      }
+    },
+    "tableName": {
+      "type": "String",
+      "defaultValue": "cloudflarefirewall_CL",
+      "metadata": {
+        "description": "Name of the custom Log Analytics table. Must end with _CL."
+      }
+    }
+  },
+  "variables": {
+    "workspaceResourceId": "[resourceId(parameters('workspaceResourceGroup'), 'Microsoft.OperationalInsights/workspaces', parameters('workspaceName'))]",
+    "dceResourceId": "[resourceId('Microsoft.Insights/dataCollectionEndpoints', parameters('dceName'))]",
+    "streamName": "Custom-cloudflarefirewall_CL"
+  },
+  "resources": [
+    {
+      "comments": "Data Collection Endpoint (DCE)",
+      "type": "Microsoft.Insights/dataCollectionEndpoints",
+      "apiVersion": "2022-06-01",
+      "name": "[parameters('dceName')]",
+      "location": "[parameters('location')]",
+      "properties": {
+        "networkAcls": {
+          "publicNetworkAccess": "Enabled"
+        }
+      }
+    },
+    {
+      "comments": "Custom table \u2014 must be created via DCR-based custom logs API",
+      "type": "Microsoft.OperationalInsights/workspaces/tables",
+      "apiVersion": "2022-10-01",
+      "name": "[concat(parameters('workspaceName'), '/', parameters('tableName'))]",
+      "properties": {
+        "schema": {
+          "name": "[parameters('tableName')]",
+          "columns": [
+            {
+              "name": "TimeGenerated",
+              "type": "datetime"
+            },
+            {
+              "name": "action",
+              "type": "string"
+            },
+            {
+              "name": "clientCountryName",
+              "type": "string"
+            },
+            {
+              "name": "clientIP",
+              "type": "string"
+            },
+            {
+              "name": "clientRequestHTTPHost",
+              "type": "string"
+            },
+            {
+              "name": "clientRequestHTTPMethodName",
+              "type": "string"
+            },
+            {
+              "name": "clientRequestPath",
+              "type": "string"
+            },
+            {
+              "name": "rayName",
+              "type": "string"
+            },
+            {
+              "name": "ruleId",
+              "type": "string"
+            },
+            {
+              "name": "source",
+              "type": "string"
+            },
+            {
+              "name": "userAgent",
+              "type": "string"
+            },
+            {
+              "name": "Referer",
+              "type": "string"
+            },
+            {
+              "name": "Url",
+              "type": "string"
+            },
+            {
+              "name": "HttpUserAgent",
+              "type": "string"
+            },
+            {
+              "name": "HttpHost",
+              "type": "string"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "comments": "Data Collection Rule with KQL transform",
+      "type": "Microsoft.Insights/dataCollectionRules",
+      "apiVersion": "2023-03-11",
+      "name": "[parameters('dcrName')]",
+      "location": "[parameters('location')]",
+      "dependsOn": [
+        "[resourceId('Microsoft.Insights/dataCollectionEndpoints', parameters('dceName'))]",
+        "[resourceId('Microsoft.OperationalInsights/workspaces/tables', parameters('workspaceName'), parameters('tableName'))]"
+      ],
+      "properties": {
+        "dataCollectionEndpointId": "[variables('dceResourceId')]",
+        "streamDeclarations": {
+          "Custom-cloudflarefirewall_CL": {
+            "columns": [
+              {
+                "name": "action",
+                "type": "string"
+              },
+              {
+                "name": "clientCountryName",
+                "type": "string"
+              },
+              {
+                "name": "clientIP",
+                "type": "string"
+              },
+              {
+                "name": "clientRequestHTTPHost",
+                "type": "string"
+              },
+              {
+                "name": "clientRequestHTTPMethodName",
+                "type": "string"
+              },
+              {
+                "name": "clientRequestPath",
+                "type": "string"
+              },
+              {
+                "name": "datetime",
+                "type": "string"
+              },
+              {
+                "name": "rayName",
+                "type": "string"
+              },
+              {
+                "name": "ruleId",
+                "type": "string"
+              },
+              {
+                "name": "source",
+                "type": "string"
+              },
+              {
+                "name": "userAgent",
+                "type": "string"
+              }
+            ]
+          }
+        },
+        "dataSources": {},
+        "destinations": {
+          "logAnalytics": [
+            {
+              "workspaceResourceId": "[variables('workspaceResourceId')]",
+              "name": "sentinelWorkspace"
+            }
+          ]
+        },
+        "dataFlows": [
+          {
+            "streams": [
+              "Custom-cloudflarefirewall_CL"
+            ],
+            "destinations": [
+              "sentinelWorkspace"
+            ],
+            "transformKql": "source\n| extend TimeGenerated = todatetime(['datetime'])\n| extend Referer = clientRequestHTTPHost\n| extend Url = clientRequestPath\n| extend HttpUserAgent = userAgent\n| extend HttpHost = clientRequestHTTPHost\n| project-away ['datetime']\n",
+            "outputStream": "Custom-cloudflarefirewall_CL"
+          }
+        ]
+      }
+    }
+  ],
+  "outputs": {
+    "dceResourceId": {
+      "type": "string",
+      "value": "[variables('dceResourceId')]"
+    },
+    "dceLogsIngestionEndpoint": {
+      "type": "string",
+      "value": "[reference(parameters('dceName')).logsIngestion.endpoint]"
+    },
+    "dcrImmutableId": {
+      "type": "string",
+      "value": "[reference(parameters('dcrName')).immutableId]"
+    },
+    "tableName": {
+      "type": "string",
+      "value": "[parameters('tableName')]"
+    },
+    "streamName": {
+      "type": "string",
+      "value": "[variables('streamName')]"
+    },
+    "nextStep": {
+      "type": "string",
+      "value": "Infrastructure deployed. Note the dceLogsIngestionEndpoint and dcrImmutableId outputs \u2014 you will need them when deploying the connector template."
+    }
+  }
+}

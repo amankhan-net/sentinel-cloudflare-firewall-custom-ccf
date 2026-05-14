@@ -1,0 +1,15 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Local secrets / personal files (defensive — should not be in repo anyway)
+*.local.json
+*.secret.json
+parameters.json
