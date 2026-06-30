@@ -33,7 +33,12 @@ Please note that the GraphQL API has inherent limitations, and this solution is 
 ├── README.md                              ← this file
 ├── LICENSE                                ← MIT license
 ├── infrastructure/
-│   └── dcr-and-table.json                 ← DCR + custom table (deploy first)
+│   └── dcr-and-table.json 
+                ← DCR + custom table (deploy first)
+├── workbook/
+│   ├── cloudflare-firewall-workbook.json
+│   ├── cloudflare-firewall-workbook-gallery.json
+│   └── screenshots/                
 ├── connector/
 │   └── connector.json                     ← CCF connector definition + poller
 └── docs/
@@ -153,6 +158,46 @@ az rest --method delete \
 az rest --method delete \
   --uri "https://management.azure.com/subscriptions/<SUBSCRIPTION_ID>/resourceGroups/<RESOURCE_GROUP>/providers/Microsoft.OperationalInsights/workspaces/<WORKSPACE_NAME>/providers/Microsoft.SecurityInsights/dataConnectorDefinitions/<CONNECTOR_NAME>?api-version=2024-09-01"
   ``` 
+
+
+
+## Workbook
+
+A companion Sentinel workbook built on top of the `cloudflarefirewall_CL` table. It gives you a two-tab dashboard instead of writing the same KQL by hand every time.
+
+**Overview** fits on one screen: action tiles, events over time, a geo map of blocked requests by country, action breakdown, and top 10 countries.
+
+**Details** has the deeper material: top source IPs, top blocked/challenged paths, HTTP methods, events by host, rule hit summary, a challenge-bypassed table for spotting evasion, and the raw event log.
+
+![Workbook overview tab](workbook/screenshots/cloudflare-workbook-overview.png)
+
+![Workbook details tab](workbook/screenshots/cloudflare-workbook-details.png)
+
+Full write-up: [amankhan.net](https://amankhan.net) (https://amankhan.net/posts/Cloudflare-CCF-Connector-Workbook).
+
+### Deploying the workbook
+
+Same two options as the connector and infrastructure above.
+
+**Gallery import** — Sentinel → Workbooks → New → Advanced Editor → paste the contents of `workbook/cloudflare-firewall-workbook-gallery.json` → Apply → Save.
+
+**ARM template**
+
+```
+az deployment group create \
+  --resource-group <your-rg> \
+  --template-file workbook/cloudflare-firewall-workbook.json
+```
+
+The queries assume your table is named `cloudflarefirewall_CL` with unsuffixed column names. Run `cloudflarefirewall_CL | getschema` first to confirm yours matches, if not, find and replace the column names in the JSON before importing.
+
+
+
+
+
+
+
+
 
 
 ## Contributing

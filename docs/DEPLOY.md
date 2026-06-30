@@ -160,3 +160,47 @@ az rest --method delete \
 4. **Revoke the Cloudflare API Token** in the Cloudflare dashboard
 
 Or delete the entire resource group if it was a sandbox.
+
+## Deploying Workbook (Optional)
+
+Once the connector is running and events are landing in `cloudflarefirewall_CL`, you can add the companion workbook for a ready-made dashboard.
+
+### Option A : Gallery import
+
+1. In Sentinel, go to **Threat Management → Workbooks**
+2. Click **+ New workbook**
+3. Click the **Advanced Editor** button (the `</>` icon)
+4. Delete the placeholder content and paste in the contents of `workbook/cloudflare-firewall-workbook-gallery.json`
+5. Click **Apply**, then **Save**
+6. Name it (e.g. "Cloudflare Firewall Events") and select your workspace/region
+
+### Option B : ARM template deploy
+
+Azure Portal:
+
+1. Go to **portal.azure.com** → search "Deploy a custom template"
+2. Click **Build your own template in the editor**
+3. Paste the contents of `workbook/cloudflare-firewall-workbook.json`
+4. **Save** → fill in subscription/resource group → **Review + Create**
+
+CLI:
+
+```
+az deployment group create \
+  --resource-group <your-rg> \
+  --template-file workbook/cloudflare-firewall-workbook.json
+```
+
+### Before you import, check your table schema
+
+The workbook queries assume the table is named `cloudflarefirewall_CL` with unsuffixed column names (`action`, `clientCountryName`, `clientIP`, etc). Confirm yours matches:
+
+```
+cloudflarefirewall_CL
+| getschema
+| project ColumnName, ColumnType
+```
+
+If your table or columns came through with different names, find and replace the relevant strings in the workbook JSON before importing.
+
+
